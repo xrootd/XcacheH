@@ -120,47 +120,67 @@ int NeedRefetch_HTTP(std::string myPfn, time_t mTime)
         // in the chunk.data stream.
         if (strcasestr(chunk.data, "HTTP/1.1 200 OK") != NULL) 
             rc = 1;
-        // else if (strcasestr(chunk.data, "HTTP/1.1 304 Not Modified") != NULL) 
-        //     rc = 0;
+        else if (strcasestr(chunk.data, "HTTP/1.1 304 Not Modified") != NULL) 
+            rc = 2;
     }
     free(chunk.data);
     free(rmturl);
     return rc;
 }
 
+// to be implemented
+int NeedRefetch_ROOT(std::string myPfn, time_t mTime)  {}
 
 std::string XcacheHCheckFile(XrdSysError* eDest, 
                              const std::string myName, 
                              const std::string myPfn)
 {
     std::string rmtUrl, myLfn, msg;
+    struct stat myStat;
+    int rc;
 
     myLfn = url2lfn(myPfn);
+    myStat.st_mtime = myStat.st_atime = 0;
+    rc = cacheFileStat(myPfn, &myStat);
 
-    time_t mTime = cacheFileAtime(myPfn);
+    if (rc != 0) return myLfn; // new file, nothing to check
+
     time_t currTime = time(NULL);
 
-    if ((currTime - mTime) > cacheLifeTime)
+    // this cache entry isn't in use or used recently. 60 is too short, for testing only!
+    if ((currTime - myStat.st_atime) > cacheLifeTime)
     {
         if (myPfn.find("http") == 0) // http or https protocol
-            if (NeedRefetch_HTTP(myPfn, mTime) == 1)
+        {
+            rc = NeedRefetch_HTTP(myPfn, myStat.st_mtime);
+            if (rc == 1)
             {
-                if (cacheFilePurge(myPfn) == 0)
-                    msg = myName + ": purge " + myLfn; 
-                else
-                    msg = myName + ": fail to purge " + myLfn;
+                rc = cacheFilePurge(myPfn);
+                if (rc == 0)
+                    msg = "purge"; 
+                else if (rc == -EBUSY)  // see XrdPosixCache.hh (check ::Unlink())
+                    msg = "not purged, in use!";
+                else if (rc == -EAGAIN)
+                    msg = "not purged, file subject to internal processing!";
+                else if (rc == -errno)
+                    msg = "fail to purge";
             }
-            else // no need to refetch, or data soruce is not available
-                msg = myName + ": no need to refetch or data source no available" + myLfn;
-        else if (myPfn.find("root") == 0) //
-            msg = myName + ": dont not know what to do " + myLfn;
-        if (XcacheH_DBG != 0) eDest->Say(msg.c_str()); 
+            else if (rc == 2)// no need to refetch
+                msg = "no need to refetch!";
+            else // rc = 0: data soruce is not available
+                msg = "data source no available!";
+        }
+        else if (myPfn.find("root") == 0)
+        {
+            rc = NeedRefetch_ROOT(myPfn, myStat.st_mtime);
+            msg = "checking and purging are not implemented!";
+        }
     }
     else 
-    {
-        msg = myName + ": recently cached " + myLfn;
-        if (XcacheH_DBG != 0) eDest->Say(msg.c_str());
-    }
+        msg = "not purged - likely in use!";
+
+    msg = myName + ": " + msg + " " + myLfn;
+    if (XcacheH_DBG != 0) eDest->Say(msg.c_str()); 
 
     return myLfn;  
 }

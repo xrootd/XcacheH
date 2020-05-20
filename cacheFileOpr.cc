@@ -35,20 +35,14 @@ XrdOucCacheCMInit_t XrdOucCacheCMInit(XrdPosixCache &Cache,
 };
 XrdVERSIONINFO(XrdOucCacheCMInit,CacheCM-4-XcacheH);
 
-time_t cacheFileAtime(std::string url)
+int cacheFileStat(std::string url, struct stat* myStat)
 {
     int rc;
     char *lfn = url2lfn(url);
-    struct stat mystat; 
 
-    rc = myCache->Stat(lfn, mystat);
+    rc = myCache->Stat(lfn, *myStat);
     free(lfn);
-     
-    // if the file doesn't exist, return 0 as mtime (older than any real file)
-    if (rc == 0)
-        return mystat.st_atime;
-    else 
-        return 0;
+    return rc;
 }
 
 int cacheFilePurge(std::string url)

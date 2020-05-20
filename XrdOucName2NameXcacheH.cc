@@ -117,13 +117,13 @@ int XrdOucName2NameXcacheH::pfn2lfn(const char* pfn, char* buff, int blen)
 
     // it is import to use string::rfind() to search from the end. 
     myUrl.replace(0, myUrl.rfind("?src=") +5, "");
-    myUrl.replace(myUrl.length() -1, 1, ""); // remove the tailing "/"
+    // myUrl.replace(myUrl.length() -1, 1, ""); // remove the tailing "/"
 
     // remove u25@ from the URL (see above)
     if (myUrl.find("http://") == 0)
-        myUrl.replace(0, myUrl.find("@") +1, "http://");
+        if (myUrl.find("@") != std::string::npos) myUrl.replace(0, myUrl.find("@") +1, "http://");
     else if (myUrl.find("https://") == 0)
-        myUrl.replace(0, myUrl.find("@") +1, "https://");
+        if (myUrl.find("@") != std::string::npos) myUrl.replace(0, myUrl.find("@") +1, "https://");
     else // this scenarios should NOT happen
     {
         blen = 0;
