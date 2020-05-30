@@ -100,8 +100,11 @@ XrdOucName2NameXcacheH::XrdOucName2NameXcacheH(XrdSysError* erp, const char* con
 int XrdOucName2NameXcacheH::lfn2pfn(const char* lfn, char* buff, int blen)
 { return -EOPNOTSUPP; }
 
-// when "pss.namelib -lfncachesrc ..." is used, pfn will look 
-// like /images/junk1?src=http://u25@wt2.slac.stanford.edu/ 
+// when "pss.namelib -lfncachesrc ..." is used, pfn will look like:
+// /images/junk1?src=http://u25@wt2.slac.stanford.edu/ 
+// when "pss.namelib -lfncachesrc+ ..." is used, pfn will look like:
+// /images/junk1?src=http://u25@wt2.slac.stanford.edu&
+// /images/junk1?src=http://u25@wt2.slac.stanford.edu&mycgi=hello&his=none
 int XrdOucName2NameXcacheH::pfn2lfn(const char* pfn, char* buff, int blen) 
 {
     std::string myLfn, myPfn, myUrl;
@@ -115,23 +118,43 @@ int XrdOucName2NameXcacheH::pfn2lfn(const char* pfn, char* buff, int blen)
         return 0;
     }
 
-    // it is import to use string::rfind() to search from the end. 
-    myUrl.replace(0, myUrl.rfind("?src=") +5, "");
-    // myUrl.replace(myUrl.length() -1, 1, ""); // remove the tailing "/"
+    std::string myPath, myProt, myHostPort, myCGI;
 
-    // remove u25@ from the URL (see above)
-    if (myUrl.find("http://") == 0)
-        if (myUrl.find("@") != std::string::npos) myUrl.replace(0, myUrl.find("@") +1, "http://");
-    else if (myUrl.find("https://") == 0)
-        if (myUrl.find("@") != std::string::npos) myUrl.replace(0, myUrl.find("@") +1, "https://");
-    else // this scenarios should NOT happen
+    // it is important to use string::rfind() to search from the end. <-- why?
+    myPath = myUrl.substr(0, myUrl.find("?src="));
+    myUrl.replace(0, myPath.length() +5, "");
+
+    myProt = myUrl.substr(0, myUrl.find("://") +3);
+    myUrl.replace(0, myProt.length(), "");
+
+    // found a @ before the first '/' and '&'
+    if (myUrl.find("@") != std::string::npos && 
+        (myUrl.find("@") < myUrl.find("/") || myUrl.find("@") < myUrl.find("&")))
     {
+        myUrl.replace(0, myUrl.find("@") +1, "");
+    }
+    if (myUrl.find("&") != std::string::npos) // test '&'
+       myHostPort = myUrl.substr(0, myUrl.find("&")); 
+    else  // no CGI
+       myHostPort = myUrl;
+    myUrl.replace(0, myHostPort.length(), "");
+    // remove trailing "/"
+    if (myHostPort.find("/") == (myHostPort.length() -1)) 
+        myHostPort.replace(myHostPort.length() -1, 1, "");
+
+    myCGI = myUrl;  // note this CGI, if not empty, starts with a "&"
+    if (myCGI.length() == 0 || myCGI == "&")
+        myUrl = myProt + myHostPort + myPath;
+    else
+        myUrl = myProt + myHostPort + myPath + myCGI.replace(0, 1, "?");
+
+    // this scenarios should NOT happen
+    if (myUrl.find("http://") != 0 && myUrl.find("https://") != 0)
+    { 
         blen = 0;
         buff[0] = 0;
         return EINVAL; // see XrdOucName2Name.hh
     }
-
-    myUrl += myPfn.substr(0, myPfn.rfind("?src=")); 
 
     myLfn = XcacheHCheckFile(eDest, myName, myUrl);  
 

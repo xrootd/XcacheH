@@ -44,11 +44,12 @@ char* url2lfn(const std::string url)
     int i = lfn.find("?");
     if (i != std::string::npos)  // there is a CGI
     {
-        cgi = lfn;
-        lfn.replace(i, lfn.length()-i , "");
-        cgi = cgi.replace(0, i, "");
-        md5hash(cgi.c_str(), cgiHash);
-        lfn = lfn + "#" + cgiHash;
+//        cgi = lfn;
+//        lfn.replace(i, lfn.length()-i , "");
+//        cgi = cgi.replace(0, i, "");
+//        md5hash(cgi.c_str(), cgiHash);
+//        lfn = lfn + "#" + cgiHash;
+        lfn.replace(i, lfn.length(), "");
     }
     return strdup(lfn.c_str()); 
 }
