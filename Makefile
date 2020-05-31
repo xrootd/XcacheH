@@ -11,7 +11,7 @@ ifeq ($(strip $(XRD_LIB)),)
     XRD_LIB=/usr/lib64
 endif
 
-FLAGS=-D_REENTRANT -D_THREAD_SAFE -Wno-deprecated -std=c++0x 
+FLAGS=-D_REENTRANT -D_THREAD_SAFE -Wno-deprecated -std=c++0x #-I/usr/include/davix
 
 HEADERS=cacheFileOpr.hh url2lfn.hh XcacheH.hh
 SOURCES=XrdOucName2NameXcacheH.cc cacheFileOpr.cc url2lfn.cc XcacheH.cc
@@ -20,7 +20,7 @@ OBJECTS=XrdOucName2NameXcacheH.o cacheFileOpr.o url2lfn.o XcacheH.o
 DEBUG=-g
 
 XrdName2NameXcacheH.so: $(OBJECTS) Makefile
-	g++ ${DEBUG} -shared -fPIC -o $@ $(OBJECTS) -L${XRD_LIB} -L${XRD_LIB}/XrdCl -ldl -lssl -lcurl -lXrdCl -lXrdPosix -lstdc++
+	g++ ${DEBUG} -shared -fPIC -o $@ $(OBJECTS) -L${XRD_LIB} -L${XRD_LIB}/XrdCl -ldl -lssl -lcurl -lXrdCl -lXrdPosix -lstdc++ #-ldavix
 
 XrdOucName2NameXcacheH.o: XrdOucName2NameXcacheH.cc ${HEADERS} Makefile
 	g++ ${DEBUG} ${FLAGS} -fPIC -I ${XRD_INC} -I ${XRD_LIB} -c -o $@ $<

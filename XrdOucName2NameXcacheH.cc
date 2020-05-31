@@ -123,6 +123,9 @@ int XrdOucName2NameXcacheH::pfn2lfn(const char* pfn, char* buff, int blen)
     // it is important to use string::rfind() to search from the end. <-- why?
     myPath = myUrl.substr(0, myUrl.find("?src="));
     myUrl.replace(0, myPath.length() +5, "");
+    // sometime the myPath doesn't start with a / (e.g. if the incoming is via the root protocol)
+    if (myPath.c_str()[0] != '/')
+        myPath = "/" + myPath;
 
     myProt = myUrl.substr(0, myUrl.find("://") +3);
     myUrl.replace(0, myProt.length(), "");
