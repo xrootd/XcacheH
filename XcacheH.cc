@@ -215,9 +215,9 @@ static size_t XcacheHRemoteStatCallback(void *contents,
 #define NeedRefetch_HTTP NeedRefetch_HTTP_curl
 
 // Return
-// 0: checking was not successful.
+// 0: data source hasn't changed yet.
 // 1: yes file need to be fetched again.
-// 2: no data source hasn't changed yet.
+// 2: checking was not successful.
 //
 int NeedRefetch_HTTP_curl(std::string myPfn, time_t mTime)
 {
@@ -258,18 +258,11 @@ int NeedRefetch_HTTP_curl(std::string myPfn, time_t mTime)
     // try without X509
     res = curl_easy_perform(curl_handle);
  
-    // check for errors
-    int rc = 0;
+    // check for errors, set rc = 2: can not check
+    int rc = 2;
     if (res == CURLE_OK)
     {
-        // Two possible reponse HTTP/1.1 304 Not Modified or HTTP/1.1 200 OK (modified)
-        // If http redirection happens, these two will be the last of HTTP/1.1 response 
-        // in the chunk.data stream.
-        if (strcasestr(chunk.data, "HTTP/1.1 200 OK") != NULL) 
-            rc = 1;
-        else if (strcasestr(chunk.data, "HTTP/1.1 304 Not Modified") != NULL) 
-            rc = 2;
-        else if (strcasestr(chunk.data, "HTTP/1.1 403 Forbidden") != NULL)
+        if (strcasestr(chunk.data, "HTTP/1.1 403 Forbidden") != NULL)
         { // try with X509
             free(chunk.data);
             chunk.data = (char*)malloc(1);
@@ -290,13 +283,36 @@ int NeedRefetch_HTTP_curl(std::string myPfn, time_t mTime)
             curl_easy_setopt(curl_handle, CURLOPT_CAPATH, CApath.c_str());
 
             res = curl_easy_perform(curl_handle);
-            if (res == CURLE_OK)
+        }
+
+        if (res == CURLE_OK) 
+        {
+            // Two possible reponse HTTP/1.1 304 Not Modified or HTTP/1.1 200 OK (modified)
+            // If http redirection happens, these two will be the last of HTTP/1.1 response 
+            // in the chunk.data stream.
+            char *c = strcasestr(chunk.data, "HTTP/1.1 200 OK");
+            if (c != NULL) 
             {
-                if (strcasestr(chunk.data, "HTTP/1.1 200 OK") != NULL) 
+                // search for something like "Expires: Fri, 05 Jun 2020 04:09:49 GMT\r\n..."
+                // the expiration date could be a future date
+                c = strcasestr(c, "Expires: ");
+                if (c != NULL) 
+                {
+                    c += 9;
+                    // according to https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Date
+                    // http-date is always in GMT
+                    c = strndup(c, 29);
+                    struct tm expireTm;
+                    strptime(c, "%a, %d %b %Y %T", &expireTm);
+                    time_t expireT = mktime(&expireTm) + expireTm.tm_gmtoff;
+                    rc = ((expireT > mTime)? 0 : 1); 
+                }
+                else
                     rc = 1;
-                else if (strcasestr(chunk.data, "HTTP/1.1 304 Not Modified") != NULL) 
-                    rc = 2;
+                free(c);
             }
+            else if (strcasestr(chunk.data, "HTTP/1.1 304 Not Modified") != NULL) 
+                rc = 0;
         }
     }
 
@@ -311,8 +327,8 @@ int NeedRefetch_HTTP_curl(std::string myPfn, time_t mTime)
 int NeedRefetch_ROOT(std::string myPfn, time_t mTime)  {}
 
 // Return
+// 0: data source hasn't changed yet.
 // 1: yes file need to be fetched again.
-// 0: no data source hasn't changed yet.
 //
 /*
  * All works except fileInfo.mtime (or .st_mtime) is not filled
@@ -368,21 +384,21 @@ std::string XcacheHCheckFile(XrdSysError* eDest,
         if (myPfn.find("http") == 0) // http or https protocol
         {
             rc = NeedRefetch_HTTP(myPfn, myStat.st_mtime);
-            if (rc == 1)
+            if (rc == 0) 
+                msg = "no need to refetch!";
+            else if (rc == 1)
             {
                 rc = cacheFilePurge(myPfn);
                 if (rc == 0)
                     msg = "purge"; 
                 else if (rc == -EBUSY)  // see XrdPosixCache.hh (check ::Unlink())
-                    msg = "not purged, in use!";
+                    msg = "not purge, in use!";
                 else if (rc == -EAGAIN)
-                    msg = "not purged, file subject to internal processing!";
+                    msg = "not purge, file subject to internal processing!";
                 else if (rc == -errno)
                     msg = "fail to purge";
             }
-            else if (rc == 2)// no need to refetch
-                msg = "no need to refetch!";
-            else // rc = 0: data soruce is not available
+            else // rc = 2
                 msg = "data source no available!";
         }
         else if (myPfn.find("root") == 0)
@@ -392,7 +408,7 @@ std::string XcacheHCheckFile(XrdSysError* eDest,
         }
     }
     else 
-        msg = "not purged - likely in use!";
+        msg = "not purge - likely in use!";
 
     msg = myName + ": " + msg + " " + myLfn;
     if (XcacheH_DBG != 0) eDest->Say(msg.c_str()); 
