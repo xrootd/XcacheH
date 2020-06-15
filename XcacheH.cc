@@ -293,6 +293,12 @@ int NeedRefetch_HTTP_curl(std::string myPfn, time_t mTime)
             char *c = strcasestr(chunk.data, "HTTP/1.1 200 OK");
             if (c != NULL) 
             {
+                rc = 1;
+                /* 
+                 * Can't do the following - http://cvmfs.sdcc.bnl.gov:8000/cvmfs/atlas.sdcc.bnl.gov/.cvmfspublished
+                 * will always return "HTTP/1.1 200 OK" with an "Expires: in the future, regardless of whether the
+                 * file was changed after "If-Modified-Since:". It also doesn't provide a "Last-Modified:" field.
+                 *
                 // search for something like "Expires: Fri, 05 Jun 2020 04:09:49 GMT\r\n..."
                 // the expiration date could be a future date
                 c = strcasestr(c, "Expires: ");
@@ -306,10 +312,9 @@ int NeedRefetch_HTTP_curl(std::string myPfn, time_t mTime)
                     strptime(c, "%a, %d %b %Y %T", &expireTm);
                     time_t expireT = mktime(&expireTm) + expireTm.tm_gmtoff;
                     rc = ((expireT > mTime)? 0 : 1); 
+                    free(c);
                 }
-                else
-                    rc = 1;
-                free(c);
+                */
             }
             else if (strcasestr(chunk.data, "HTTP/1.1 304 Not Modified") != NULL) 
                 rc = 0;
