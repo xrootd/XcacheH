@@ -21,6 +21,7 @@ using namespace std;
 #include <thread>
 
 #include <mutex>
+#include <list>
 
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
@@ -37,14 +38,62 @@ struct httpResp
     size_t size;
 };
 
-void cleaner()
+#define MAXSTAGINWORKER 5
+int currStagingWorkers = 0;
+std::list<std::string> stageinList;
+std::mutex stageinMutex;
+
+void addToStageinList(std::string myPfn)
 {
-    std::string cmd = "yes";
-    while (! sleep(600))
+    int inList = 0;
+    std::list<std::string>::iterator it;
+
+    std::lock_guard<std::mutex> guard(stageinMutex);
+    for (it = stageinList.begin(); it != stageinList.end(); ++it)
     {
-        system(cmd.c_str());
+        if (*it == myPfn)
+        {
+            inList = 1;
+            break;
+        }
     }
+    if (! inList) stageinList.push_back(myPfn); 
 }
+
+void stageinWorker(std::string myPfn)
+{
+    std::string xrdcp = "xrdcp -s -f root://griddev06.slac.stanford.edu:1094//";
+    std::string xrdcpCmd;
+    xrdcpCmd = xrdcp + myPfn + " /dev/null";
+
+    // To do: check again if the file is fully cached.
+    system(xrdcpCmd.c_str());
+    std::lock_guard<std::mutex> guard(stageinMutex);
+    currStagingWorkers--; 
+}
+
+void stageinOpr()
+{
+    while (! sleep(1))
+    {
+        { // lock will be released when going out of the scope
+            std::lock_guard<std::mutex> guard(stageinMutex);
+            for (int i = currStagingWorkers; i < MAXSTAGINWORKER; i++)
+            {
+                if (stageinList.size() > 0)
+                {
+                    currStagingWorkers++;
+                    std::string url = stageinList.front();
+                    stageinList.pop_front();
+                    std::thread newStageinWorker(stageinWorker, url);
+                    newStageinWorker.detach();
+                }
+                else
+                    break;
+            }
+        }
+    }
+}    
 
 time_t cacheLifeTime;
 std::string myX509proxyFile;
@@ -58,8 +107,8 @@ void XcacheHInit(XrdSysError* eDest,
 {
     cacheLifeTime = cacheLifeT;
 
-    // std::thread cleanning(cleaner);
-    // cleanning.detach();
+    std::thread stageinThread(stageinOpr);
+    stageinThread.detach();
     curl_global_init(CURL_GLOBAL_ALL);
 
     if (getenv("X509_USER_PROXY") != NULL)
@@ -369,17 +418,28 @@ int NeedRefetch_HTTP_Davix(std::string myPfn, time_t mTime)
 
 std::string XcacheHCheckFile(XrdSysError* eDest, 
                              const std::string myName, 
-                             const std::string myPfn)
+                             const std::string myPfn,
+                             int stageinRequest)
 {
     std::string rmtUrl, myLfn, msg;
     struct stat myStat;
     int rc;
 
     myLfn = url2lfn(myPfn);
+
+    rc = cacheFileQuery(myPfn);
+
+    if (rc <= 0 && stageinRequest == 1)
+    {
+        addToStageinList(myPfn);
+    }
+    else 
+    {
+        if (rc < 0) return myLfn; // new file, nothing to check
+    }
+
     myStat.st_mtime = myStat.st_atime = 0;
     rc = cacheFileStat(myPfn, &myStat);
-
-    if (rc != 0) return myLfn; // new file, nothing to check
 
     time_t currTime = time(NULL);
 

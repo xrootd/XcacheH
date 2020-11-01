@@ -54,3 +54,13 @@ int cacheFilePurge(std::string url)
     free(lfn);
     return rc;
 }
+
+int cacheFileQuery(std::string url)
+{
+    int rc;
+    char *lfn = url2lfn(url);
+ 
+    rc = myCache->CacheQuery(lfn, true);
+    free(lfn);
+    return rc;
+}

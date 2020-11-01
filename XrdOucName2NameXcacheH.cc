@@ -146,6 +146,21 @@ int XrdOucName2NameXcacheH::pfn2lfn(const char* pfn, char* buff, int blen)
         myHostPort.replace(myHostPort.length() -1, 1, "");
 
     myCGI = myUrl;  // note this CGI, if not empty, starts with a "&"
+
+    std::string stageinToken;
+    int stageinRequest = 0;
+
+    if (myProt == "http://" || myProt == "https://")
+        stageinToken = "&xcachestagein";
+    else
+        stageinToken = "&xcachestagein=";
+
+    if (myCGI.find(stageinToken) != std::string::npos) // This is a stage in request
+    {
+        myCGI = myCGI.replace(myCGI.find(stageinToken), stageinToken.length(), "");
+        stageinRequest = 1;
+    }
+
     if (myCGI.length() == 0 || myCGI == "&")
         myUrl = myProt + myHostPort + myPath;
     else
@@ -159,12 +174,15 @@ int XrdOucName2NameXcacheH::pfn2lfn(const char* pfn, char* buff, int blen)
         return EINVAL; // see XrdOucName2Name.hh
     }
 
-    myLfn = XcacheHCheckFile(eDest, myName, myUrl);  
+    myLfn = XcacheHCheckFile(eDest, myName, myUrl, stageinRequest);  
 
     if (myLfn == "EFAULT")
         return EFAULT;
     else if (myLfn == "ENOENT") 
         return ENOENT;
+
+    if (stageinRequest == 1)
+        return EALREADY;
 
     blen = myLfn.length();
     strncpy(buff, myLfn.c_str(), blen);

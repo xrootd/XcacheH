@@ -8,4 +8,5 @@
 void XcacheHInit(XrdSysError* eDest, const std::string myName, time_t cacheLifeT);
 std::string XcacheHCheckFile(XrdSysError* eDest,
                              const std::string myName,
-                             const std::string myPfn);
+                             const std::string myPfn,
+                             int stageinRequest);
