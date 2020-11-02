@@ -38,18 +38,23 @@ using namespace std;
 #include "XrdSys/XrdSysError.hh"
 #include "XrdPosix/XrdPosixXrootd.hh"
 
+static int XcacheH_DBG = 1;
+
 struct httpResp 
 {
     char *data;
     size_t size;
 };
 
+XrdSysError* eDest;
+std::string myName;
+
 time_t cacheLifeTime;
 size_t cacheBlockSize;
 int xrdPort;
 std::string hostName;
 
-#define MAXSTAGINWORKER 1
+#define MAXSTAGINWORKERS 2
 int currStagingWorkers = 0;
 std::list<std::string> stageinList;
 std::mutex stageinMutex;
@@ -71,7 +76,17 @@ void addToStageinList(std::string myPfn)
             break;
         }
     }
-    if (! inList) stageinList.push_back(myPfn); 
+
+    std::string msg;
+    if (! inList) 
+    {
+        stageinList.push_back(myPfn); 
+        msg = myName + ": adding stagein request for " + myPfn;
+    }
+    else
+        msg = myName + ": reject stagein request for " + myPfn;
+
+    if (XcacheH_DBG == 1) eDest->Say(msg.c_str());
 }
 
 void sparseReading(std::string localUrl, size_t blockSize)
@@ -100,40 +115,54 @@ void stageinWorker(std::string myPfn)
     std::string localUrl = "root://" + hostName + ":" + std::to_string(xrdPort) + "//" + myPfn;
 
     // To do: check again if the file is fully cached.
+    std::string msg;
+    msg = myName + ": stagein now: " + myPfn;
+    if (XcacheH_DBG == 1) eDest->Say(msg.c_str());
+
     sparseReading(localUrl, cacheBlockSize);
+
     std::lock_guard<std::mutex> guard(stageinMutex);
     currStagingWorkers--; 
+
+    msg = myName + ": stagein completed: " + myPfn;
+    if (XcacheH_DBG == 1) eDest->Say(msg.c_str());
 }
 
 void stageinOpr()
 {
-    while (! sleep(1))
-    {
-        { // lock will be released when going out of the scope
-            std::lock_guard<std::mutex> guard(stageinMutex);
-            for (int i = currStagingWorkers; i < MAXSTAGINWORKER; i++)
+    while (! sleep(20))
+    {  // lock will be released when going out of the scope
+        std::lock_guard<std::mutex> guard(stageinMutex);
+
+        std::string msg = myName + ": stagein list snapshot: available workers: "
+                                 + std::to_string(MAXSTAGINWORKERS - currStagingWorkers) 
+                                 + ", list length: "
+                                 + std::to_string(stageinList.size());
+        if (XcacheH_DBG == 1) eDest->Say(msg.c_str());
+
+        for (int i = currStagingWorkers; i < MAXSTAGINWORKERS; i++)
+        {
+            if (stageinList.size() > 0)
             {
-                if (stageinList.size() > 0)
-                {
-                    currStagingWorkers++;
-                    std::string url = stageinList.front();
-                    stageinList.pop_front();
-                    std::thread newStageinWorker(stageinWorker, url);
-                    newStageinWorker.detach();
-                }
-                else
-                    break;
+                currStagingWorkers++;
+                std::string url = stageinList.front();
+                stageinList.pop_front();
+                std::thread newStageinWorker(stageinWorker, url);
+                newStageinWorker.detach();
             }
+            else
+                break;
         }
     }
 }    
 
-static int XcacheH_DBG = 1;
-
-void XcacheHInit(XrdSysError* eDest,
-                 const std::string myName, 
+void XcacheHInit(XrdSysError* eDst,
+                 const std::string Name, 
                  struct cacheOptions *cacheOpts)
 {
+    eDest = eDst;
+    myName = Name;
+
     cacheLifeTime = cacheOpts->lifeT;
     cacheBlockSize = cacheOpts->blockSize;
     xrdPort = cacheOpts->xrdPort;
@@ -448,9 +477,7 @@ int NeedRefetch_HTTP_Davix(std::string myPfn, time_t mTime)
 }
 */
 
-std::string XcacheHCheckFile(XrdSysError* eDest, 
-                             const std::string myName, 
-                             const std::string myPfn,
+std::string XcacheHCheckFile(const std::string myPfn,
                              int stageinRequest)
 {
     std::string rmtUrl, myLfn, msg;

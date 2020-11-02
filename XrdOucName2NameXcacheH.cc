@@ -216,7 +216,7 @@ int XrdOucName2NameXcacheH::pfn2lfn(const char* pfn, char* buff, int blen)
         return EINVAL; // see XrdOucName2Name.hh
     }
 
-    myLfn = XcacheHCheckFile(eDest, myName, myUrl, stageinRequest);  
+    myLfn = XcacheHCheckFile(myUrl, stageinRequest);  
 
     if (myLfn == "EFAULT")
         return EFAULT;

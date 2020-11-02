@@ -14,7 +14,4 @@ struct cacheOptions
 };
 
 void XcacheHInit(XrdSysError* eDest, const std::string myName, struct cacheOptions *cacheOpt);
-std::string XcacheHCheckFile(XrdSysError* eDest,
-                             const std::string myName,
-                             const std::string myPfn,
-                             int stageinRequest);
+std::string XcacheHCheckFile(const std::string myPfn, int stageinRequest);
