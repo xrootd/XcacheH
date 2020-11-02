@@ -61,6 +61,11 @@ XrdOucName2NameXcacheH::XrdOucName2NameXcacheH(XrdSysError* erp, const char* con
     key = "";
     value = "";
 
+    // the default
+    cacheOpts.blockSize = 1048576;
+    cacheOpts.xrdPort = std::stoi(getenv("XRDPORT"));
+    cacheOpts.hostName = "localhost";
+
     opts = parms;
     opts += " ";
     for (it=opts.begin(); it!=opts.end(); ++it)
