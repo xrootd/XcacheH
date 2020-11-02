@@ -9,6 +9,8 @@ using namespace std;
 #include <curl/curl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+
 #include <unistd.h>
 #include <time.h>
 #include <string.h>
@@ -28,9 +30,13 @@ using namespace std;
 #include <openssl/pem.h>
 
 #include "url2lfn.hh"
+#include "XcacheH.hh"
 #include "cacheFileOpr.hh"
 #include "XrdCl/XrdClURL.hh"
+#include "XrdCl/XrdClXRootDResponses.hh"
+#include "XrdCl/XrdClFile.hh"
 #include "XrdSys/XrdSysError.hh"
+#include "XrdPosix/XrdPosixXrootd.hh"
 
 struct httpResp 
 {
@@ -38,10 +44,18 @@ struct httpResp
     size_t size;
 };
 
-#define MAXSTAGINWORKER 5
+time_t cacheLifeTime;
+size_t cacheBlockSize;
+int xrdPort;
+std::string hostName;
+
+#define MAXSTAGINWORKER 1
 int currStagingWorkers = 0;
 std::list<std::string> stageinList;
 std::mutex stageinMutex;
+
+std::string myX509proxyFile;
+std::string CApath;
 
 void addToStageinList(std::string myPfn)
 {
@@ -60,14 +74,33 @@ void addToStageinList(std::string myPfn)
     if (! inList) stageinList.push_back(myPfn); 
 }
 
+void sparseReading(std::string localUrl, size_t blockSize)
+{
+    int fd;
+    size_t offset;
+    uint32_t n = 1;
+    char buff[2];
+
+    offset = 0;
+    XrdCl::XRootDStatus myStatus;
+    XrdCl::ResponseHandler myRespHdler;
+
+    XrdCl::File myRmtFile;
+    myStatus = myRmtFile.Open(localUrl.c_str(), XrdCl::OpenFlags::Read, XrdCl::Access::None, uint16_t(0));
+    while (myStatus.status == 0 && n > 0)
+    {
+        myStatus = myRmtFile.Read(offset, 1, (void*)buff, n, uint16_t(0));
+        offset += blockSize;
+    }
+    myStatus = myRmtFile.Close(uint16_t(0));
+}
+
 void stageinWorker(std::string myPfn)
 {
-    std::string xrdcp = "xrdcp -s -f root://griddev06.slac.stanford.edu:1094//";
-    std::string xrdcpCmd;
-    xrdcpCmd = xrdcp + myPfn + " /dev/null";
+    std::string localUrl = "root://" + hostName + ":" + std::to_string(xrdPort) + "//" + myPfn;
 
     // To do: check again if the file is fully cached.
-    system(xrdcpCmd.c_str());
+    sparseReading(localUrl, cacheBlockSize);
     std::lock_guard<std::mutex> guard(stageinMutex);
     currStagingWorkers--; 
 }
@@ -95,17 +128,16 @@ void stageinOpr()
     }
 }    
 
-time_t cacheLifeTime;
-std::string myX509proxyFile;
-std::string CApath;
-
 static int XcacheH_DBG = 1;
 
 void XcacheHInit(XrdSysError* eDest,
                  const std::string myName, 
-                 time_t cacheLifeT)
+                 struct cacheOptions *cacheOpts)
 {
-    cacheLifeTime = cacheLifeT;
+    cacheLifeTime = cacheOpts->lifeT;
+    cacheBlockSize = cacheOpts->blockSize;
+    xrdPort = cacheOpts->xrdPort;
+    hostName = cacheOpts->hostName;
 
     std::thread stageinThread(stageinOpr);
     stageinThread.detach();
@@ -432,6 +464,7 @@ std::string XcacheHCheckFile(XrdSysError* eDest,
     if (rc <= 0 && stageinRequest == 1)
     {
         addToStageinList(myPfn);
+        return "EALREADY"; 
     }
     else 
     {

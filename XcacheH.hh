@@ -5,7 +5,15 @@
 
 #include "XrdSys/XrdSysError.hh"
 
-void XcacheHInit(XrdSysError* eDest, const std::string myName, time_t cacheLifeT);
+struct cacheOptions
+{
+    time_t lifeT;
+    size_t blockSize; 
+    int    xrdPort;
+    std::string hostName;
+};
+
+void XcacheHInit(XrdSysError* eDest, const std::string myName, struct cacheOptions *cacheOpt);
 std::string XcacheHCheckFile(XrdSysError* eDest,
                              const std::string myName,
                              const std::string myPfn,

@@ -30,8 +30,8 @@ public:
 
     friend XrdOucName2Name *XrdOucgetName2Name(XrdOucgetName2NameArgs);
 private:
-    string myName, optCacheLife = ""; // unit: seconds
-    time_t cacheLifeT;
+    string myName;
+    struct cacheOptions cacheOpts;
     XrdSysError *eDest;
     bool isCmsd;
 };
@@ -46,7 +46,7 @@ XrdOucName2NameXcacheH::XrdOucName2NameXcacheH(XrdSysError* erp, const char* con
 
     myName = "XcacheH";
     eDest = erp;
-    
+
     isCmsd = false;
     if (getenv("XRDPROG")) 
     {
@@ -69,7 +69,52 @@ XrdOucName2NameXcacheH::XrdOucName2NameXcacheH(XrdSysError* erp, const char* con
         else if (*it == ' ') 
         { 
             if (key == "cacheLife")  // unit: seconds
-                optCacheLife = value;
+            {
+                if (value.find_first_not_of("0123456789.") == std::string::npos)
+                {
+                    cacheOpts.lifeT = atoi(value.c_str());
+                }
+                else
+                {
+                    cacheOpts.lifeT = 3600;
+                    message = myName + " Init: option cacheLife = " 
+                                     + value 
+                                     + " is invalid. Set it to 1 hour"; 
+                    eDest->Say(message.c_str());
+                }
+            }
+            else if (key == "cacheBlockSize") // unit: bytes
+            {
+                if (value.find_first_not_of("0123456789.") == std::string::npos)
+                {
+                    cacheOpts.blockSize = atoi(value.c_str());
+                }
+                else
+                {
+                    message = myName + " Init: option cacheBlockSize = " 
+                                     + value
+                                     + " is invalid. Will guess from the xrootd config";
+                    eDest->Say(message.c_str());
+                }
+            }
+            else if (key == "xrdPort") 
+            {
+                if (value.find_first_not_of("0123456789.") == std::string::npos)
+                {
+                    cacheOpts.xrdPort = atoi(value.c_str());
+                }
+                else
+                {
+                    message = myName + " Init: option xrdPort = "
+                                     + value
+                                     + " is invalid. Will guess from the xrootd config";
+                    eDest->Say(message.c_str());
+                }
+            }
+            else if (key == "hostName") // my hostName to be used by sparse stagein request
+            {
+                cacheOpts.hostName = value;
+            }
             key = "";
             value = "";  
             x = 0;
@@ -81,20 +126,17 @@ XrdOucName2NameXcacheH::XrdOucName2NameXcacheH(XrdSysError* erp, const char* con
         }
     }
 
-
-    if (optCacheLife.find_first_not_of("0123456789.") == std::string::npos)
-    {
-        cacheLifeT = atoi(optCacheLife.c_str());
-        message = myName + " Init: cacheLife = " + optCacheLife;
-    }
-    else
-    {
-        cacheLifeT = 3600;
-        message = myName + " Init: cacheLife = " + optCacheLife + " is invalid or not set. Set it to 1 hour";
-    }
+    message = myName + " Init: effective option cacheLife = " + std::to_string(cacheOpts.lifeT);
+    eDest->Say(message.c_str());
+    message = myName + " Init: effective option cacheBlockSize = " + std::to_string(cacheOpts.blockSize);
+    eDest->Say(message.c_str());
+    message = myName + " Init: effective option hostName:xrdPort = " + cacheOpts.hostName 
+                                                                     + ":"
+                                                                     + std::to_string(cacheOpts.xrdPort);
     eDest->Say(message.c_str());
 
-    XcacheHInit(eDest, myName, cacheLifeT);
+
+    XcacheHInit(eDest, myName, &cacheOpts);
 }
 
 int XrdOucName2NameXcacheH::lfn2pfn(const char* lfn, char* buff, int blen)
