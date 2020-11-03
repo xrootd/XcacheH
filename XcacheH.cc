@@ -54,7 +54,7 @@ size_t cacheBlockSize;
 int xrdPort;
 std::string hostName;
 
-#define MAXSTAGINWORKERS 2
+#define MAXSTAGINWORKERS 10
 int currStagingWorkers = 0;
 std::list<std::string> stageinList;
 std::mutex stageinMutex;

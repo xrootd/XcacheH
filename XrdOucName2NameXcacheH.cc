@@ -8,6 +8,7 @@ using namespace std;
 #include <stdio.h>
 #include <string>
 #include <errno.h>
+#include <netdb.h>
 #include <openssl/md5.h>
 #include "XrdVersion.hh"
 XrdVERSIONINFO(XrdOucgetName2Name, "N2N-XcacheH");
@@ -42,7 +43,9 @@ XrdOucName2NameXcacheH::XrdOucName2NameXcacheH(XrdSysError* erp, const char* con
     std::string opts, message, key, value;
     std::string::iterator it;
     std::size_t i;
-    int x;
+    int unit, x;
+    char unitName;
+    char *hostName;
 
     myName = "XcacheH";
     eDest = erp;
@@ -62,9 +65,15 @@ XrdOucName2NameXcacheH::XrdOucName2NameXcacheH(XrdSysError* erp, const char* con
     value = "";
 
     // the default
+    cacheOpts.lifeT = 3600;
     cacheOpts.blockSize = 1048576;
     cacheOpts.xrdPort = std::stoi(getenv("XRDPORT"));
-    cacheOpts.hostName = "localhost";
+
+    hostName = (char*)malloc(256);
+    gethostname(hostName, 256);
+    struct hostent *myHostEnt = gethostbyname(hostName);
+    cacheOpts.hostName = myHostEnt->h_name;
+    free(hostName);
 
     opts = parms;
     opts += " ";
@@ -73,32 +82,83 @@ XrdOucName2NameXcacheH::XrdOucName2NameXcacheH(XrdSysError* erp, const char* con
         if (*it == '=') x = 1;
         else if (*it == ' ') 
         { 
-            if (key == "cacheLife")  // unit: seconds
+            if (key == "cacheLife")  // unit: s/S (default), m/M, h/H, d/D, 
             {
+                unit = 1;
+                if (value.find_first_not_of("0123456789.") != std::string::npos)
+                {
+                    unitName = value.substr(value.find_first_not_of("0123456789."), 1).c_str()[0];
+                    if (unitName == 's' || unitName == 'S') 
+                        unit = 1;
+                    else if (unitName == 'm' || unitName == 'M')
+                        unit = 60;
+                    else if (unitName == 'h' || unitName == 'H')
+                        unit = 3600;
+                    else if (unitName == 'd' || unitName == 'D')
+                        unit = 86400;
+                    else
+                    {
+                        message = myName + " Init: option cacheLife = "
+                                  + value
+                                  + " is invalid";
+                        eDest->Say(message.c_str());
+                    }
+
+                    value.replace(value.find_first_not_of("0123456789."), 
+                                  value.length() - value.find_first_not_of("0123456789."), 
+                                  "");
+                }
+
                 if (value.find_first_not_of("0123456789.") == std::string::npos)
                 {
-                    cacheOpts.lifeT = atoi(value.c_str());
+                    cacheOpts.lifeT = atoi(value.c_str()) * unit;
                 }
                 else
                 {
-                    cacheOpts.lifeT = 3600;
-                    message = myName + " Init: option cacheLife = " 
-                                     + value 
-                                     + " is invalid. Set it to 1 hour"; 
+                    message = myName + " Init: option cacheLife = "
+                                     + value
+                                     + " is invalid. Using default ("
+                                     + std::to_string(cacheOpts.lifeT)
+                                     + " seconds)";
                     eDest->Say(message.c_str());
                 }
             }
-            else if (key == "cacheBlockSize") // unit: bytes
+            else if (key == "cacheBlockSize") // unit: b/B (default), k/K, m/M
             {
+                unit = 1;
+                if (value.find_first_not_of("0123456789.") != std::string::npos)
+                {
+                    unitName = value.substr(value.find_first_not_of("0123456789."), 1).c_str()[0];
+                    if (unitName == 'b' || unitName == 'B')
+                        unit = 1;
+                    else if (unitName == 'k' || unitName == 'K')
+                        unit = 1024;
+                    else if (unitName == 'm' || unitName == 'M')
+                        unit = 1048576;
+                    else
+                    {
+                        message = myName + " Init: option cacheBlockSize = "
+                                  + value
+                                  + " is invalid";
+                        eDest->Say(message.c_str());
+                    }
+
+                    value.replace(value.find_first_not_of("0123456789."), 
+                                  value.length() - value.find_first_not_of("0123456789."), 
+                                  "");
+                }
+
                 if (value.find_first_not_of("0123456789.") == std::string::npos)
                 {
-                    cacheOpts.blockSize = atoi(value.c_str());
+                    cacheOpts.blockSize = atoi(value.c_str()) * unit;
                 }
                 else
                 {
                     message = myName + " Init: option cacheBlockSize = " 
                                      + value
-                                     + " is invalid. Will guess from the xrootd config";
+                                     + " is invalid. Using default ("
+                                     + std::to_string(cacheOpts.blockSize)
+                                     + " bytes)";
                     eDest->Say(message.c_str());
                 }
             }
@@ -112,7 +172,7 @@ XrdOucName2NameXcacheH::XrdOucName2NameXcacheH(XrdSysError* erp, const char* con
                 {
                     message = myName + " Init: option xrdPort = "
                                      + value
-                                     + " is invalid. Will guess from the xrootd config";
+                                     + " is invalid";
                     eDest->Say(message.c_str());
                 }
             }
@@ -194,21 +254,35 @@ int XrdOucName2NameXcacheH::pfn2lfn(const char* pfn, char* buff, int blen)
 
     myCGI = myUrl;  // note this CGI, if not empty, starts with a "&"
 
-    std::string stageinToken;
+    std::string stageinToken = "xcachestagein";;
     int stageinRequest = 0;
 
-    if (myProt == "http://" || myProt == "https://")
-        stageinToken = "&xcachestagein";
-    else
-        stageinToken = "&xcachestagein=";
-
-    if (myCGI.find(stageinToken) != std::string::npos) // This is a stage in request
+    if (myCGI.find(stageinToken + "=") != std::string::npos) // This is a stage in request
     {
-        myCGI = myCGI.replace(myCGI.find(stageinToken), stageinToken.length(), "");
         stageinRequest = 1;
+        myCGI.replace(myCGI.find(stageinToken + "="), stageinToken.length() +1, "");
+    }
+    else if (myCGI.find(stageinToken) != std::string::npos) // This is a stage in request
+    {
+        stageinRequest = 1;
+        myCGI.replace(myCGI.find(stageinToken), stageinToken.length(), "");
     }
 
-    if (myCGI.length() == 0 || myCGI == "&")
+    // trim the trailing ? or &
+    while ( myCGI.length() != 0 &&
+            ((myCGI.rfind("?") == (myCGI.length() -1)) ||
+             (myCGI.rfind("&") == (myCGI.length() -1))) )
+        myCGI.replace(myCGI.length() -1, 1, "");
+
+    // trim ?& to ?
+    while ( myCGI.length() != 0 && myCGI.rfind("?&") != std::string::npos )
+        myCGI.replace(myCGI.rfind("?&") +1, 1, "");
+
+    // trim ?& to &
+    while ( myCGI.length() != 0 && myCGI.rfind("&&") != std::string::npos )
+        myCGI.replace(myCGI.rfind("&&") +1, 1, "");
+
+    if (myCGI.length() == 0)
         myUrl = myProt + myHostPort + myPath;
     else
         myUrl = myProt + myHostPort + myPath + myCGI.replace(0, 1, "?");
@@ -227,8 +301,7 @@ int XrdOucName2NameXcacheH::pfn2lfn(const char* pfn, char* buff, int blen)
         return EFAULT;
     else if (myLfn == "ENOENT") 
         return ENOENT;
-
-    if (stageinRequest == 1)
+    else if (myLfn == "EALREADY")
         return EALREADY;
 
     blen = myLfn.length();
