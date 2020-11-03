@@ -44,11 +44,16 @@ char* url2lfn(const std::string url)
     int i = lfn.find("?");
     if (i != std::string::npos)  // there is a CGI
     {
+        // Disable caching based on CGI, until we decide whether
+        // we want the cache to be data cache or response cache.
+        lfn.replace(i, lfn.length() -i, "");
+/*
         cgi = lfn;
         lfn.replace(i, lfn.length()-i , "");
         cgi = cgi.replace(0, i, "");
         md5hash(cgi.c_str(), cgiHash);
         lfn = lfn + "#" + cgiHash;
+*/
     }
     return strdup(lfn.c_str()); 
 }
